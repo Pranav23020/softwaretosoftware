@@ -16,16 +16,23 @@ import {
   PRESET_THEMES,
   StudioAnalyzeRequestSchema,
   StudioComposeRequestSchema,
+  ArchitectureGraphSchema,
+  buildArchitectureGraph,
+  buildVerificationPlan,
+  safeValidateProjectIR,
 } from "@forge/core";
 import type { ModuleRequirement } from "@forge/core";
 import { createLedgerStore } from "./store.js";
 import { generateSkeleton } from "./generator.js";
 import { scanRepository } from "./scanner-service.js";
 import { composeProject } from "./composer.js";
-import { runSandboxVerification, getActiveSandboxStatus, stopActiveSandbox, startActiveSandbox } from "./sandbox-runner.js";
+import { runManifestSandboxVerification, runSandboxVerification, getActiveSandboxStatus, stopActiveSandbox, startActiveSandbox } from "./sandbox-runner.js";
 import { buildModuleRequirement, discoverModulesForCapabilities, rankDiscoveredModules } from "./discovery-service.js";
 import { composeCustomStudioProject } from "./studio-service.js";
 import { generateModulePlanWithGroq } from "./groq-service.js";
+import { composeArchitectureProject, normalizeSelectedModules } from "./generic-composer.js";
+import { createVerificationPlan, persistVerificationReport, readVerificationManifest, runManifestVerification } from "./verification-service.js";
+import { diagnoseStoredFailure, readRepairHistory, runRepairLoop } from "./repair-service.js";
 
 
 export function createApp(options: { outputRoot?: string; dbPath?: string } = {}) {
@@ -181,6 +188,77 @@ export function createApp(options: { outputRoot?: string; dbPath?: string } = {}
     }
   });
 
+  app.post("/api/verification/plan", (req, res) => {
+    try {
+      const projectSlug = typeof req.body?.projectSlug === "string" ? req.body.projectSlug.trim() : "";
+      if (!projectSlug) return res.status(400).json({ ok: false, error: "projectSlug is required" });
+      const plan = createVerificationPlan(effectiveRoot, projectSlug);
+      return res.json({ ok: true, plan });
+    } catch (error) {
+      return res.status(400).json({ ok: false, error: error instanceof Error ? error.message : "Verification plan failed" });
+    }
+  });
+
+  app.post("/api/verify", (req, res) => {
+    try {
+      const projectSlug = typeof req.body?.projectSlug === "string" ? req.body.projectSlug.trim() : "";
+      if (!projectSlug) return res.status(400).json({ ok: false, error: "projectSlug is required" });
+      const timeoutMs = typeof req.body?.timeoutMs === "number" ? req.body.timeoutMs : 15000;
+      const staticReport = runManifestVerification(effectiveRoot, projectSlug, timeoutMs);
+      if (staticReport.status === "failed") return res.status(200).json({ ok: false, report: staticReport });
+      return runManifestSandboxVerification(projectSlug, { outputRoot: effectiveRoot, timeoutMs }).then((runtimeReport) => {
+        const checks = [...staticReport.checks, ...runtimeReport.checks];
+        const failures = [...staticReport.failures, ...runtimeReport.failures];
+        const report = { ...runtimeReport, durationMs: staticReport.durationMs + runtimeReport.durationMs, checks, failures, status: failures.length ? "failed" as const : "healthy" as const, summary: { total: checks.length, passed: checks.filter((check) => check.status === "passed").length, failed: checks.filter((check) => check.status === "failed").length, warnings: checks.filter((check) => check.severity === "warning").length } };
+        persistVerificationReport(effectiveRoot, projectSlug, report);
+        return res.status(200).json({ ok: report.status !== "failed", report });
+      }).catch((error) => res.status(200).json({ ok: false, report: { ...staticReport, status: "failed", failures: [{ type: "STARTUP_FAILURE", checkId: "runtime-startup", message: error instanceof Error ? error.message : String(error), relatedArchitectureNodes: [], generatedFiles: [] }] } }));
+    } catch (error) {
+      return res.status(400).json({ ok: false, error: error instanceof Error ? error.message : "Verification failed" });
+    }
+  });
+
+  app.post("/api/repair/diagnose", (req, res) => {
+    try {
+      const projectSlug = typeof req.body?.projectSlug === "string" ? req.body.projectSlug.trim() : "";
+      if (!projectSlug) return res.status(400).json({ ok: false, error: "projectSlug is required" });
+      const plan = diagnoseStoredFailure(effectiveRoot, projectSlug, req.body?.verificationReport);
+      return res.json({ ok: true, diagnosis: plan.diagnosis, repairCandidates: plan.candidates, scope: plan.scope });
+    } catch (error) {
+      return res.status(400).json({ ok: false, error: error instanceof Error ? error.message : "Diagnosis failed" });
+    }
+  });
+
+  app.post("/api/repair/plan", (req, res) => {
+    try {
+      const projectSlug = typeof req.body?.projectSlug === "string" ? req.body.projectSlug.trim() : "";
+      if (!projectSlug) return res.status(400).json({ ok: false, error: "projectSlug is required" });
+      const plan = diagnoseStoredFailure(effectiveRoot, projectSlug, req.body?.verificationReport);
+      return res.json({ ok: true, ...plan });
+    } catch (error) {
+      return res.status(400).json({ ok: false, error: error instanceof Error ? error.message : "Repair planning failed" });
+    }
+  });
+
+  app.post("/api/repair/run", (req, res) => {
+    try {
+      const projectSlug = typeof req.body?.projectSlug === "string" ? req.body.projectSlug.trim() : "";
+      if (!projectSlug) return res.status(400).json({ ok: false, error: "projectSlug is required" });
+      const history = runRepairLoop(effectiveRoot, projectSlug, { maxAttempts: req.body?.maxAttempts, initialReport: req.body?.verificationReport });
+      return res.json({ ok: history.finalStatus === "passed", status: history.finalStatus, history });
+    } catch (error) {
+      return res.status(400).json({ ok: false, error: error instanceof Error ? error.message : "Repair execution failed" });
+    }
+  });
+
+  app.get("/api/repair/history/:slug", (req, res) => {
+    try {
+      return res.json({ ok: true, history: readRepairHistory(effectiveRoot, req.params.slug) });
+    } catch (error) {
+      return res.status(404).json({ ok: false, error: error instanceof Error ? error.message : "Repair history not found" });
+    }
+  });
+
   app.get("/api/sandbox/status", (_req, res) => {
     return res.json(getActiveSandboxStatus());
   });
@@ -236,6 +314,35 @@ export function createApp(options: { outputRoot?: string; dbPath?: string } = {}
     });
   });
 
+  app.post("/api/studio/compose-generic", (req, res) => {
+    const projectResult = safeValidateProjectIR(req.body?.projectIR);
+    if (!projectResult.success || !projectResult.data) {
+      return res.status(400).json({ error: "Invalid Project IR", details: projectResult.errors });
+    }
+    const architectureResult = ArchitectureGraphSchema.safeParse(req.body?.architecture ?? buildArchitectureGraph(projectResult.data));
+    if (!architectureResult.success) {
+      return res.status(400).json({ error: "Invalid architecture graph", details: architectureResult.error.flatten() });
+    }
+    try {
+      const composed = composeArchitectureProject(effectiveRoot, {
+        project: projectResult.data,
+        architecture: architectureResult.data,
+        selectedModules: normalizeSelectedModules(req.body?.selectedModules),
+      });
+      return res.status(201).json({
+        ok: true,
+        target: composed.target,
+        artifacts: composed.artifacts,
+        report: composed.plan.report,
+        api: composed.plan.api,
+        verificationPlan: buildVerificationPlan(composed.plan.manifest),
+        manifest: composed.plan.manifest,
+      });
+    } catch (error) {
+      return res.status(422).json({ ok: false, error: error instanceof Error ? error.message : "Generic composition failed" });
+    }
+  });
+
   app.post("/api/studio/analyze", async (req, res) => {
     const prompt = typeof req.body?.prompt === "string" ? req.body.prompt.trim() : "";
     if (!prompt) {
@@ -245,6 +352,7 @@ export function createApp(options: { outputRoot?: string; dbPath?: string } = {}
 
     // 1. Generate dynamic module plan using Groq LLM (or smart fallback)
     const plan = await generateModulePlanWithGroq(prompt, groqApiKey);
+    const architecture = plan.projectIR ? buildArchitectureGraph(plan.projectIR) : undefined;
 
     // 2. Discover real GitHub + npm modules with security audit
     // Build the full keyword hint from projectName + description for better GitHub queries
@@ -287,6 +395,7 @@ export function createApp(options: { outputRoot?: string; dbPath?: string } = {}
       designOptions: plan.designOptions,
       requiredModules: plan.requiredModules,
       projectIR: plan.projectIR,
+      architecture,
       moduleRequirements,
       rankedModules: selections,
       selectedModules,

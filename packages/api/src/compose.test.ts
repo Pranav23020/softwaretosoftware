@@ -4,7 +4,7 @@
  */
 import { describe, it, expect, afterEach } from "vitest";
 import request from "supertest";
-import { mkdtempSync, rmSync, existsSync } from "node:fs";
+import { mkdtempSync, rmSync, existsSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createApp } from "./app.js";
@@ -176,5 +176,32 @@ describe("POST /api/compose", () => {
     expect(r.body.ledger[0]).toHaveProperty("artifact");
     expect(r.body.ledger[0]).toHaveProperty("capability");
     expect(r.body.ledger[0]).toHaveProperty("why");
+  });
+});
+
+describe("POST /api/studio/compose-generic", () => {
+  it("composes project-specific files and a Phase 6 manifest", async () => {
+    const root = mkdtempSync(join(tmpdir(), "forge-generic-compose-"));
+    closers.push(() => rmSync(root, { recursive: true, force: true }));
+    const projectIR = {
+      project: { name: "Recipe Desk", slug: "recipe-desk", type: "fullstack_app", description: "Manage recipes", version: "0.1.0" },
+      entities: [{ name: "Recipe", plural: "recipes", description: "A recipe", fields: [{ name: "id", type: "uuid", required: true, unique: true, isPrimary: true }, { name: "title", type: "string", required: true, unique: false, isPrimary: false }], relationships: [], indexes: ["title"] }],
+      features: ["search"],
+      roles: ["user"],
+      integrations: [],
+      constraints: { frontend: "react", backend: "node-express", database: "sqlite" },
+    };
+    const r = await request(mkApp({ outputRoot: root }))
+      .post("/api/studio/compose-generic")
+      .send({ projectIR });
+    expect(r.status).toBe(201);
+    expect(r.body.artifacts).toContain("forge.manifest.json");
+    expect(r.body.artifacts).toContain("src/server/routes/recipes.ts");
+    expect(r.body.verificationPlan.apiChecks.some((check: any) => check.path === "/api/recipes")).toBe(true);
+    expect(r.body.api.endpoints.some((endpoint: any) => endpoint.path === "/api/recipes")).toBe(true);
+    const manifest = JSON.parse(readFileSync(join(r.body.target, "forge.manifest.json"), "utf8"));
+    expect(manifest.project.project.name).toBe("Recipe Desk");
+    expect(readFileSync(join(r.body.target, "src/server/db.ts"), "utf8")).toContain("CREATE TABLE IF NOT EXISTS recipes");
+    expect(readFileSync(join(r.body.target, "src/server/db.ts"), "utf8")).not.toContain("listings");
   });
 });

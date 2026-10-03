@@ -37,6 +37,18 @@ Open `http://127.0.0.1:8787`. The React dashboard and local API are served by th
 
 FORGE binds to localhost; request bodies are schema-validated and size-limited. The generator writes a small fixed allowlist of templates, validates every target path, rejects path traversal and symlink roots, and never runs user/model text as a command. Generated projects are artifacts for review, not trusted code execution. See [security notes](docs/SECURITY.md).
 
+## v0.5 - Architecture-driven composition
+
+Phase 6 adds a generic composition path: `Project IR -> Architecture Graph -> selected modules -> CompositionPlan -> generated project`. The plan derives canonical entity names, SQLite tables and relationships, API contracts, conditional frontend metadata, selected dependencies, generated tests, and `forge.manifest.json`. Use `POST /api/studio/compose-generic` for structured projects; the legacy `/api/compose` Student Marketplace fixture remains available for regression coverage. See [composition notes](docs/COMPOSITION.md).
+
+## v0.6 - Manifest-driven verification
+
+Phase 7 adds verification planning and execution from each generated project's manifest. `POST /api/verification/plan` exposes project-specific static, build, database, runtime, and API checks; `POST /api/verify` executes safe artifact/build checks and contract-driven loopback probes, persisting `verification.json`. See [verification notes](docs/VERIFICATION.md).
+
+## v0.7 - Bounded self-repair
+
+Phase 8 adds deterministic failure classification, architecture-aware diagnosis, repair planning, user-modification protection, bounded repair execution, and `repair-history.json`. Use `/api/repair/diagnose`, `/api/repair/plan`, `/api/repair/run`, and `/api/repair/history/:slug`. See [repair engine notes](docs/REPAIR-ENGINE.md).
+
 ## What the demo proves
 
 The Student Marketplace input selects the authentication, CRUD, upload, search, pagination, administration, charts, form, validation, REST, and SQLite contracts. The dashboard visualizes the resolved dependency topology, build stages, guarded choices, affected-capability analysis, and an artifact ledger answering why each module exists.

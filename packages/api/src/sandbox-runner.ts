@@ -20,6 +20,8 @@ import type {
   SandboxProcessStatus,
   SandboxRunReport,
 } from "@forge/core";
+import { buildVerificationPlan, type VerificationCheckResult, type VerificationFailure, type VerificationReport } from "@forge/core";
+import { readVerificationManifest } from "./verification-service.js";
 
 // ── Path validation ─────────────────────────────────────────────────────────
 
@@ -359,6 +361,91 @@ async function runProbe(
       details: err instanceof Error ? err.message : String(err),
     };
   }
+}
+
+async function runContractProbe(
+  baseUrl: string,
+  check: ReturnType<typeof buildVerificationPlan>["apiChecks"][number],
+  timeoutMs: number,
+): Promise<{ ok: boolean; status: number; durationMs: number; details?: string }> {
+  const started = Date.now();
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const path = check.path.replace(/:id/g, "FORGE_TEST_001");
+  try {
+    const response = await fetch(`${baseUrl}${path}`, {
+      method: check.method,
+      headers: check.requestBody ? { "content-type": "application/json" } : undefined,
+      body: check.requestBody ? JSON.stringify(check.requestBody) : undefined,
+      signal: controller.signal,
+    });
+    const text = await response.text();
+    return { ok: response.status === check.expectedStatus, status: response.status, durationMs: Date.now() - started, details: text.slice(0, 300) };
+  } catch (error) {
+    return { ok: false, status: 0, durationMs: Date.now() - started, details: error instanceof Error ? error.message : String(error) };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function waitForContractBoot(port: number, checks: ReturnType<typeof buildVerificationPlan>["apiChecks"], maxWaitMs = 7000): Promise<boolean> {
+  const start = Date.now();
+  const candidate = checks.find((check) => check.method === "GET")?.path;
+  if (!candidate) return false;
+  while (Date.now() - start < maxWaitMs) {
+    try {
+      const response = await fetch(`http://127.0.0.1:${port}${candidate.replace(/:id/g, "FORGE_TEST_001")}`, { signal: AbortSignal.timeout(800) });
+      if (response.status > 0) return true;
+    } catch {
+      await new Promise((resolve) => setTimeout(resolve, 150));
+    }
+  }
+  return false;
+}
+
+export async function runManifestSandboxVerification(
+  projectSlug: string,
+  options: SandboxOptions & { outputRoot?: string } = {},
+): Promise<VerificationReport> {
+  const started = Date.now();
+  const outputRoot = options.outputRoot || "generated-projects";
+  const { directory, manifest } = readVerificationManifest(outputRoot, projectSlug);
+  const plan = buildVerificationPlan(manifest);
+  const port = options.port || (await findFreePort(4300));
+  const maxMemoryMb = options.maxMemoryMb || 256;
+  const timeoutMs = options.timeoutMs || 15000;
+  const dependencyResult = ensureDependencies(directory, outputRoot);
+  const { cmd, args } = resolveTsxBinary(directory, outputRoot);
+  const proc = spawn(cmd, args, { cwd: directory, env: createSanitizedEnv(port, maxMemoryMb, dependencyResult.workspaceRoot), stdio: ["ignore", "pipe", "pipe"], shell: false });
+  const logs: string[] = [];
+  proc.stdout?.on("data", (chunk) => { if (logs.length < 100) logs.push(`[stdout] ${chunk.toString("utf8")}`); });
+  proc.stderr?.on("data", (chunk) => { if (logs.length < 100) logs.push(`[stderr] ${chunk.toString("utf8")}`); });
+  const checks: VerificationCheckResult[] = [];
+  const failures: VerificationFailure[] = [];
+  const deadline = setTimeout(() => killProcess(proc), timeoutMs);
+  try {
+    const booted = await waitForContractBoot(port, plan.apiChecks);
+    const bootCheck = plan.runtimeChecks.find((check) => check.id === "runtime-startup");
+    if (bootCheck) {
+      const failureResult = booted ? undefined : { type: "STARTUP_FAILURE" as const, checkId: bootCheck.id, message: "Generated server did not answer an API contract path.", relatedArchitectureNodes: [], generatedFiles: ["src/server/index.ts"] };
+      const result: VerificationCheckResult = { ...bootCheck, status: booted ? "passed" : "failed", durationMs: 0, details: booted ? "Contract route answered." : failureResult?.message, failure: failureResult };
+      checks.push(result);
+      if (failureResult) failures.push(failureResult);
+    }
+    if (booted) {
+      for (const check of plan.apiChecks) {
+        const probe = await runContractProbe(`http://127.0.0.1:${port}`, check, Math.min(timeoutMs, check.timeoutMs ?? 3000));
+        const failureResult = probe.ok ? undefined : { type: check.expectedStatus === 401 ? "AUTH_FAILURE" as const : "HTTP_FAILURE" as const, checkId: check.id, message: `Expected ${check.expectedStatus}, received ${probe.status}.`, request: { method: check.method, path: check.path, body: check.requestBody }, response: { status: probe.status, details: probe.details }, relatedArchitectureNodes: check.source.filter((source) => source.includes(":")), generatedFiles: [] };
+        const result: VerificationCheckResult = { ...check, status: probe.ok ? "passed" : "failed", durationMs: probe.durationMs, details: probe.details, failure: failureResult };
+        checks.push(result);
+        if (failureResult) failures.push(failureResult);
+      }
+    }
+  } finally {
+    clearTimeout(deadline);
+    killProcess(proc);
+  }
+  return { status: failures.length ? "failed" : "healthy", project: String((manifest.project as { name?: string } | undefined)?.name ?? projectSlug), projectSlug, durationMs: Date.now() - started, summary: { total: checks.length, passed: checks.filter((check) => check.status === "passed").length, failed: checks.filter((check) => check.status === "failed").length, warnings: checks.filter((check) => check.severity === "warning").length }, checks, failures, verifiedAt: new Date().toISOString() };
 }
 
 async function waitForServerBoot(port: number, maxWaitMs = 6000): Promise<boolean> {

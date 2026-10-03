@@ -25,6 +25,36 @@ Build ledger ─────────────► source, why, dependencie
 
 The build planner runs dependency-first depth-first ordering over the selected directed acyclic graph. For each selected contract it emits an artifact ledger record. Affected-capability analysis computes direct dependents for high-risk adapter swaps; it is deterministic and conservative in this MVP.
 
+## Phase 6 composition
+
+Architecture-driven projects continue through a pure composition plan before files are written:
+
+```text
+Project IR -> Architecture Graph -> Phase 5 module candidates -> CompositionPlan -> GeneratedFilePlan -> generated project + forge.manifest.json
+```
+
+The generic path uses shared naming utilities across database, API, and frontend generation, emits an explicit API contract, and creates conditional structures only for selected capabilities. The original `/api/compose` route remains as a Student Marketplace regression fixture rather than the generic engine.
+
+## Phase 7 verification
+
+Generated manifests feed a project-specific verification planner:
+
+```text
+forge.manifest.json -> VerificationPlan -> static/build/database checks -> API contract probes -> VerificationReport
+```
+
+Verification checks are traced to manifest API endpoints, architecture nodes, generated files, and database tables. Reports and structured failures are persisted as `verification.json` for the future repair phase. See [verification notes](VERIFICATION.md).
+
+## Phase 8 repair
+
+Verification failures now flow through deterministic classification and scoped repair planning:
+
+```text
+VerificationReport -> diagnosis -> repair scope -> policy -> bounded executor -> rebuild/reverify
+```
+
+Repair plans preserve unrelated files, reject user-modified targets by manifest fingerprint, cap attempts at three, and persist `repair-history.json`. High-risk schema, API, security, and module replacement operations remain review-gated. See [repair engine notes](REPAIR-ENGINE.md).
+
 ## API
 
 | Method | Endpoint | Result |
@@ -36,6 +66,7 @@ The build planner runs dependency-first depth-first ordering over the selected d
 | POST | `/api/generate` | Safe, fixed-template project skeleton |
 | GET | `/api/registry` | Approved capability modules and review metadata |
 | POST | `/api/compose` | Reviewed module template composer with `skipCovered` adaptive mode |
+| POST | `/api/studio/compose-generic` | Architecture-driven composition plan, generated files, API contract, and manifest |
 | POST | `/api/scan` | AST-based repository adapter scanner and compatibility diff |
 
 ## Packages

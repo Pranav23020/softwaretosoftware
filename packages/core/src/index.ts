@@ -90,6 +90,15 @@ export * from "./capabilities/index.js";
 // Discovery – normalized candidates and deterministic explainable selection
 export * from "./discovery/index.js";
 
+// Composition - architecture-driven project plans and generated file models
+export * from "./composition/index.js";
+
+// Verification - manifest-driven checks and structured failure contracts
+export * from "./verification/index.js";
+
+// Repair - bounded deterministic diagnosis and repair planning
+export * from "./repair/index.js";
+
 
 
 
