@@ -81,6 +81,10 @@ export {
 // IR – Project Intermediate Representation
 export * from "./ir/index.js";
 
+// Graph – Architecture Graph DAG
+export * from "./graph/index.js";
+
+
 
 
 
