@@ -45,6 +45,8 @@ forge.manifest.json -> VerificationPlan -> static/build/database checks -> API c
 
 Verification checks are traced to manifest API endpoints, architecture nodes, generated files, and database tables. Reports and structured failures are persisted as `verification.json` for the future repair phase. See [verification notes](VERIFICATION.md).
 
+The Studio is the product-facing orchestration layer over these artifacts. Its generic workspace uses typed API services for analysis, composition, verification, repair, export, and `GET /api/studio/project/:slug` reloads. The legacy Student Marketplace dashboard and fixture endpoints remain separate regression surfaces. See [Studio architecture](STUDIO-ARCHITECTURE.md).
+
 ## Phase 8 repair
 
 Verification failures now flow through deterministic classification and scoped repair planning:

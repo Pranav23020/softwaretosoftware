@@ -63,6 +63,7 @@ export interface VerificationReport { status: "healthy" | "failed" | "timed_out"
 export interface StudioFile { path: string; size: number; content?: string; }
 export interface RepairPlan { diagnosis: { category: string; summary: string; rootCause?: string; confidence: number; affectedArchitectureNodes: string[]; affectedModules: string[]; affectedFiles: string[]; evidence: string[] }; candidates: { id: string; type: string; description: string; risk: string; confidence: number; affectedFiles: string[]; reason: string }[]; selectedRepair?: { type: string; description: string; risk: string; affectedFiles: string[] }; scope: { affectedNodes: string[]; affectedFiles: string[]; preservedFiles: string[]; userModifiedFiles: string[] }; blockedReason?: string; }
 export interface RepairHistory { projectSlug: string; maxAttempts: number; finalStatus: string; attempts: { attempt: number; result: string; message: string; filesChanged: string[]; filesPreserved: number }[]; }
+export interface StudioProjectSnapshot { ok: boolean; slug: string; manifest: Record<string, any>; verificationReport: VerificationReport | null; repairHistory: RepairHistory | null; }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, init);
@@ -85,4 +86,5 @@ export const forgeApi = {
   planRepair(slug: string, verificationReport: VerificationReport) { return request<{ ok: boolean } & RepairPlan>("/api/repair/plan", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ projectSlug: slug, verificationReport }) }); },
   runRepair(slug: string, verificationReport: VerificationReport) { return request<{ ok: boolean; status: string; history: RepairHistory }>("/api/repair/run", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ projectSlug: slug, verificationReport, maxAttempts: 3 }) }); },
   history(slug: string) { return request<{ ok: boolean; history: RepairHistory }>(`/api/repair/history/${encodeURIComponent(slug)}`); },
+  project(slug: string) { return request<StudioProjectSnapshot>(`/api/studio/project/${encodeURIComponent(slug)}`); },
 };

@@ -47,6 +47,41 @@ test("build ledger tab shows provenance entries", async ({ page }) => {
   await expect(page.locator("#artifact-ledger article").first()).toBeVisible();
 });
 
+test("generic Studio workflow renders a non-commerce project from backend evidence", async ({ page }) => {
+  await page.route("**/api/studio/analyze", async (route) => route.fulfill({ json: {
+    ok: true,
+    projectName: "Issue Tracker",
+    projectSlug: "issue-tracker",
+    description: "Track engineering issues and projects.",
+    generatedBy: "smart-engine",
+    projectIR: { project: { name: "Issue Tracker", slug: "issue-tracker" }, entities: [{ name: "Issue", plural: "issues" }], features: ["comments"], roles: ["user"], integrations: [] },
+    architecture: { nodes: [{ id: "table:issue", label: "Issue table", type: "database-table", layer: "database", capabilityId: "database" }], edges: [] },
+    moduleRequirements: [], rankedModules: [], selectedModules: [], discoveredModules: [], capabilities: ["comments"],
+  }}));
+  await page.route("**/api/studio/compose-generic", async (route) => route.fulfill({ json: {
+    ok: true,
+    target: "issue-tracker",
+    artifacts: ["forge.manifest.json", "src/server/routes/issues.ts"],
+    report: { filesGenerated: 2, entitiesGenerated: 1, apiEndpointsGenerated: 1, testsGenerated: 1 },
+    api: { endpoints: [{ method: "GET", path: "/api/issues", operationId: "listIssue", description: "List issues", authRequired: false }], middleware: [] },
+    verificationPlan: { checks: [], apiChecks: [], runtimeChecks: [], staticChecks: [], expectedTables: ["issues"] },
+    manifest: { project: { project: { name: "Issue Tracker", slug: "issue-tracker" } }, generatedFiles: [{ path: "forge.manifest.json" }], api: { endpoints: [] }, database: { tables: ["issues"] } },
+  }}));
+  await page.route("**/api/studio/files/issue-tracker", async (route) => route.fulfill({ json: { ok: true, files: [{ path: "src/server/routes/issues.ts", size: 20, content: "GET /api/issues" }] } }));
+  await page.route("**/api/verification/plan", async (route) => route.fulfill({ json: { ok: true, plan: { checks: [], apiChecks: [], runtimeChecks: [], staticChecks: [], expectedTables: ["issues"] } } }));
+  await page.route("**/api/verify", async (route) => route.fulfill({ json: { ok: true, report: { status: "healthy", project: "Issue Tracker", projectSlug: "issue-tracker", summary: { total: 1, passed: 1, failed: 0, warnings: 0 }, checks: [{ id: "build", name: "Build", category: "build", severity: "error", source: [], description: "Build", status: "passed" }], failures: [], durationMs: 1 } } }));
+
+  await page.goto(BASE);
+  await page.getByRole("button", { name: "✦ New Project Studio" }).click();
+  await page.locator("#forge-prompt").fill("Build an issue tracking application with projects and issues");
+  await page.getByRole("button", { name: "Generate pipeline" }).click();
+  await expect(page.getByText("Issue Tracker").first()).toBeVisible();
+  await expect(page.getByText("Issue table")).toBeVisible();
+  await page.getByRole("button", { name: "Compose project" }).click();
+  await expect(page.getByText("Generated project structure")).toBeVisible();
+  await expect(page.getByText("VERIFIED")).toBeVisible();
+});
+
 test("adapter scanner tab scans local repository and displays capability coverage", async ({ page }) => {
   await page.goto(BASE);
   await page.getByRole("button", { name: "Adapter Scanner" }).click();

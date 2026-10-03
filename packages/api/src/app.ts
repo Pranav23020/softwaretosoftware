@@ -471,6 +471,21 @@ export function createApp(options: { outputRoot?: string; dbPath?: string } = {}
     archive.finalize();
   });
 
+  app.get("/api/studio/project/:slug", (req, res) => {
+    const cleanSlug = req.params.slug.replace(/[^a-z0-9_-]/gi, "-").toLowerCase();
+    const projectDir = resolve(effectiveRoot, cleanSlug);
+    const manifestPath = resolve(projectDir, "forge.manifest.json");
+    if (!existsSync(projectDir) || !existsSync(manifestPath)) return res.status(404).json({ ok: false, error: "Project manifest not found" });
+    try {
+      const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+      const verificationPath = resolve(projectDir, "verification.json");
+      const repairHistoryPath = resolve(projectDir, "repair-history.json");
+      return res.json({ ok: true, slug: cleanSlug, manifest, verificationReport: existsSync(verificationPath) ? JSON.parse(readFileSync(verificationPath, "utf8")) : null, repairHistory: existsSync(repairHistoryPath) ? JSON.parse(readFileSync(repairHistoryPath, "utf8")) : null });
+    } catch {
+      return res.status(422).json({ ok: false, error: "Project manifest is invalid" });
+    }
+  });
+
   // Browse all project files for syntax viewer & code copy
   app.get("/api/studio/files/:slug", (req, res) => {
     const cleanSlug = req.params.slug.replace(/[^a-z0-9_-]/gi, "-").toLowerCase();

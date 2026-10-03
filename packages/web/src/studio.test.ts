@@ -20,4 +20,10 @@ describe("Studio API orchestration", () => {
     expect(fetchMock).toHaveBeenCalledWith("/api/verify", expect.anything());
     expect(fetchMock.mock.calls.some(([path]) => path === "/api/repair/history/expense-tracker")).toBe(true);
   });
+
+  it("loads persisted Studio project state by slug", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ ok: true, slug: "issue-tracker", manifest: { project: { name: "Issue Tracker" } }, verificationReport: null, repairHistory: null }), { status: 200, headers: { "content-type": "application/json" } }));
+    await forgeApi.project("issue-tracker");
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/studio/project/issue-tracker");
+  });
 });

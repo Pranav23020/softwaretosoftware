@@ -60,6 +60,16 @@ describe("Phase 7 verification service", () => {
     expect(response.body.plan.apiChecks[0].path).toBe("/api/notes");
   });
 
+  it("reloads persisted project state through the Studio boundary", async () => {
+    const root = createProjectRoot();
+    const app = createApp({ outputRoot: root });
+    servers.push(app);
+    const response = await request(app.app).get("/api/studio/project/notes");
+    expect(response.status).toBe(200);
+    expect(response.body.manifest.project.name).toBe("Notes");
+    expect(response.body.verificationReport).toBeNull();
+  });
+
   it("diagnoses and boundedly repairs a missing dependency without rewriting unrelated files", async () => {
     const root = createProjectRoot();
     const project = join(root, "notes");
