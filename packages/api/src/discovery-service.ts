@@ -68,9 +68,9 @@ export function auditCodeSecurity(sourceCode: string): {
 
   // === DANGEROUS patterns ===
   if (/child_process|execSync|spawnSync/i.test(sourceCode))
-    warnings.push("Shell command execution (child_process)");
+    warnings.push("Shell command execution (child_process / subprocess)");
   if (/\beval\s*\(|new\s+Function\s*\(/i.test(sourceCode))
-    warnings.push("Dynamic code evaluation (eval/Function)");
+    warnings.push("Dynamic code evaluation / dynamic code evaluation (eval/Function)");
   if (/process\.env\.[A-Z_]+\s*=|process\.exit\s*\(\s*[^0]\s*\)/i.test(sourceCode))
     warnings.push("Mutates process environment or force-exits");
   if (/fs\.(unlink|rmdir|rm|rmdirSync|unlinkSync|rmSync)\s*\(/i.test(sourceCode))
@@ -384,7 +384,7 @@ export async function discoverModulesForCapabilities(
     if (isTest) {
       const seed = OFFLINE_SEED[capId];
       if (seed) {
-        modules.push({
+        discovered.push({
           id: `seed-${capId}`,
           name: seed.name,
           capability: capId,

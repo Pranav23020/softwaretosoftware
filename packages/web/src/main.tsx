@@ -1711,7 +1711,8 @@ function StudioPanel({
                         display: "flex", alignItems: "center", justifyContent: "center",
                         marginBottom: 6,
                       }}>
-                        <span style={{ fontSize: 16 }}>{item.icon || "📦"}</span>
+                        <span style={{ fontSize: 16 }}>{("icon" in item && item.icon) ? item.icon : "📦"}</span>
+
                       </div>
                       {item.badge && (
                         <span style={{

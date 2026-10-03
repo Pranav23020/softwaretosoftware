@@ -6,3 +6,5 @@ export * from "./integrations.js";
 export * from "./constraints.js";
 export * from "./architecture.js";
 export * from "./schemas.js";
+export * from "./extraction-schema.js";
+

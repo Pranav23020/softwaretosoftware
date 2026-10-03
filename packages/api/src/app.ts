@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
 // eslint-disable-next-line @typescript-eslint/no-var-requires
-const archiver = require("archiver") as typeof import("archiver");
+const archiver = require("archiver") as any;
 import {
   ProjectRequirementsSchema,
   forge,
@@ -317,7 +317,7 @@ export function createApp(options: { outputRoot?: string; dbPath?: string } = {}
     }
     res.attachment(`${cleanSlug}.zip`);
     const archive = archiver("zip", { zlib: { level: 9 } });
-    archive.on("error", (err) => res.status(500).send({ error: err.message }));
+    archive.on("error", (err: any) => res.status(500).send({ error: err.message }));
     archive.pipe(res);
     archive.directory(projectDir, false);
     archive.finalize();
