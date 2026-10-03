@@ -84,6 +84,10 @@ export * from "./ir/index.js";
 // Graph – Architecture Graph DAG
 export * from "./graph/index.js";
 
+// Capabilities – Dynamic Capability Resolution
+export * from "./capabilities/index.js";
+
+
 
 
 
