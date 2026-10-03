@@ -78,5 +78,9 @@ export {
   parseAppPrompt,
 } from "./studio.js";
 
+// IR – Project Intermediate Representation
+export * from "./ir/index.js";
+
+
 
 
