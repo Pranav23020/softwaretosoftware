@@ -49,6 +49,10 @@ Phase 7 adds verification planning and execution from each generated project's m
 
 Phase 8 adds deterministic failure classification, architecture-aware diagnosis, repair planning, user-modification protection, bounded repair execution, and `repair-history.json`. Use `/api/repair/diagnose`, `/api/repair/plan`, `/api/repair/run`, and `/api/repair/history/:slug`. See [repair engine notes](docs/REPAIR-ENGINE.md).
 
+## v0.8 - Studio orchestration
+
+Phase 9 turns the Studio tab into a transparent pipeline over the existing engine: Project IR, architecture, discovery, selection, generic composition, verification, repair, and export. The visible Studio consumes typed API services and renders real counts, files, checks, failures, repair scope, fallback mode, and event timestamps. See [Studio notes](docs/STUDIO.md).
+
 ## What the demo proves
 
 The Student Marketplace input selects the authentication, CRUD, upload, search, pagination, administration, charts, form, validation, REST, and SQLite contracts. The dashboard visualizes the resolved dependency topology, build stages, guarded choices, affected-capability analysis, and an artifact ledger answering why each module exists.

@@ -7,6 +7,7 @@ import type {
   PlannedCapability,
   ProjectRequirements,
 } from "@forge/core";
+import { StudioOrchestrator } from "./app/StudioOrchestrator.js";
 import "./styles.css";
 
 type Result = {
@@ -509,7 +510,8 @@ function App() {
             onStop={stopSandbox}
           />
         )}
-        {tab === "studio" && (
+        {tab === "studio" && <StudioOrchestrator />}
+        {false && tab === "studio" && (
           <StudioPanel
             prompt={studioPrompt}
             setPrompt={setStudioPrompt}

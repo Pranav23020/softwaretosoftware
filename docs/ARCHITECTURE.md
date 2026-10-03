@@ -55,6 +55,10 @@ VerificationReport -> diagnosis -> repair scope -> policy -> bounded executor ->
 
 Repair plans preserve unrelated files, reject user-modified targets by manifest fingerprint, cap attempts at three, and persist `repair-history.json`. High-risk schema, API, security, and module replacement operations remain review-gated. See [repair engine notes](REPAIR-ENGINE.md).
 
+## Phase 9 Studio
+
+The Studio is a typed orchestration and observability layer over the authoritative backend artifacts. It renders the Project IR, Architecture Graph, module ranking evidence, CompositionPlan, VerificationPlan/Report, and RepairPlan without duplicating decision logic in React. See [Studio notes](STUDIO.md).
+
 ## API
 
 | Method | Endpoint | Result |
