@@ -17,12 +17,13 @@ import {
   StudioAnalyzeRequestSchema,
   StudioComposeRequestSchema,
 } from "@forge/core";
+import type { ModuleRequirement } from "@forge/core";
 import { createLedgerStore } from "./store.js";
 import { generateSkeleton } from "./generator.js";
 import { scanRepository } from "./scanner-service.js";
 import { composeProject } from "./composer.js";
 import { runSandboxVerification, getActiveSandboxStatus, stopActiveSandbox, startActiveSandbox } from "./sandbox-runner.js";
-import { discoverModulesForCapabilities } from "./discovery-service.js";
+import { buildModuleRequirement, discoverModulesForCapabilities, rankDiscoveredModules } from "./discovery-service.js";
 import { composeCustomStudioProject } from "./studio-service.js";
 import { generateModulePlanWithGroq } from "./groq-service.js";
 
@@ -212,6 +213,29 @@ export function createApp(options: { outputRoot?: string; dbPath?: string } = {}
   // ── Studio: Groq AI Planning, Discovery, Theme Customizer & Code Export ──
 
   // Stream real-time GitHub discovery progress via Server-Sent Events
+  app.post("/api/studio/discovery", async (req, res) => {
+    const projectText = typeof req.body?.projectText === "string" ? req.body.projectText : "";
+    const rawRequirements = Array.isArray(req.body?.requirements) ? req.body.requirements : [];
+    const requirements: ModuleRequirement[] = rawRequirements.length > 0
+      ? rawRequirements.map((requirement: any) => buildModuleRequirement({
+        id: String(requirement.id ?? requirement.capability ?? "requirement"),
+        name: requirement.name,
+        description: String(requirement.description ?? requirement.capability ?? ""),
+      }, projectText))
+      : (Array.isArray(req.body?.projectIR?.features) ? req.body.projectIR.features.map((feature: unknown) => buildModuleRequirement({ id: String(feature) }, projectText)) : []);
+    if (requirements.length === 0) return res.status(400).json({ error: "At least one module requirement is required" });
+    const discoveredModules = await discoverModulesForCapabilities(requirements.map((requirement) => requirement.capability), projectText);
+    const ranked = requirements.map((requirement) => ({ requirement, ...rankDiscoveredModules(requirement, discoveredModules, { projectText }) }));
+    return res.json({
+      requirements: ranked,
+      stats: {
+        candidatesDiscovered: discoveredModules.length,
+        eligibleCandidates: ranked.reduce((count, result) => count + result.ranked.filter((candidate) => candidate.eligibility === "eligible").length, 0),
+        selectedModules: ranked.filter((result) => result.selected).length,
+      },
+    });
+  });
+
   app.post("/api/studio/analyze", async (req, res) => {
     const prompt = typeof req.body?.prompt === "string" ? req.body.prompt.trim() : "";
     if (!prompt) {
@@ -225,8 +249,14 @@ export function createApp(options: { outputRoot?: string; dbPath?: string } = {}
     // 2. Discover real GitHub + npm modules with security audit
     // Build the full keyword hint from projectName + description for better GitHub queries
     const discoveryHint = `${plan.projectName} ${plan.description} ${plan.category}`.slice(0, 120);
-    const moduleQueries = plan.requiredModules.map(m => m.category as any);
+    const moduleQueries = plan.requiredModules.map(m => m.id as any);
     const discoveredModules = await discoverModulesForCapabilities(moduleQueries, discoveryHint);
+    const moduleRequirements = plan.requiredModules.map((module) => buildModuleRequirement(module, `${plan.projectName} ${plan.description}`));
+    const selections = moduleRequirements.map((requirement) => ({
+      requirement,
+      ...rankDiscoveredModules(requirement, discoveredModules, { projectText: discoveryHint }),
+    }));
+    const selectedModules = selections.flatMap((selection) => selection.selected ? [selection.selected.candidate] : []);
 
     const THEME_ID_TO_UI_KEY: Record<string, string> = {
       cyberpunk: "neon-teal",
@@ -256,6 +286,12 @@ export function createApp(options: { outputRoot?: string; dbPath?: string } = {}
       themePalette: plan.suggestedTheme,
       designOptions: plan.designOptions,
       requiredModules: plan.requiredModules,
+      projectIR: plan.projectIR,
+      moduleRequirements,
+      rankedModules: selections,
+      selectedModules,
+      alternatives: selections.flatMap((selection) => selection.alternatives),
+      selectionReasons: selections.map((selection) => ({ requirement: selection.requirement.id, reasons: selection.selected?.reasons ?? [], warnings: selection.selected?.warnings ?? [] })),
       seedData: plan.seedData,
       generatedBy: plan.generatedBy,
       discoveredModules,
@@ -266,6 +302,9 @@ export function createApp(options: { outputRoot?: string; dbPath?: string } = {}
         fromNpm: npmCount,
         fromLocal: localCount,
         passedAudit: discoveredModules.filter(m => m.securityAudit.passed).length,
+        candidatesDiscovered: discoveredModules.length,
+        eligibleCandidates: selections.reduce((count, selection) => count + selection.ranked.filter((candidate) => candidate.eligibility === "eligible").length, 0),
+        selectedModules: selectedModules.length,
         totalStars: discoveredModules.reduce((s, m) => s + (m.stars ?? 0), 0),
       },
       presetThemes: PRESET_THEMES,

@@ -87,6 +87,9 @@ export * from "./graph/index.js";
 // Capabilities – Dynamic Capability Resolution
 export * from "./capabilities/index.js";
 
+// Discovery – normalized candidates and deterministic explainable selection
+export * from "./discovery/index.js";
+
 
 
 

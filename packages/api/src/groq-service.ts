@@ -609,10 +609,15 @@ export async function generateModulePlanWithGroq(
     },
     requiredModules: irResponse.features.map((feat) => {
       const id = typeof feat === "string" ? feat : feat.id;
+      const category = id.includes("pdf") || id.includes("upload") || id.includes("websocket") || id.includes("payment") || id.includes("llm")
+        ? "integration"
+        : id.includes("match") || id.includes("extract") || id.includes("parse") || id.includes("chart")
+          ? "domain"
+          : "feature";
       return {
         id,
         name: typeof feat === "object" && feat.name ? feat.name : id,
-        category: "crud",
+        category,
         description: `Implementation for ${id}`,
         openSourceQuery: id.replace(/-/g, " "),
       };

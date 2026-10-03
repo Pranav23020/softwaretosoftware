@@ -1,5 +1,5 @@
-import type { CapabilityId, DiscoveredModule } from "@forge/core";
-import { MODULE_REGISTRY } from "@forge/core";
+import type { CapabilityId, DiscoveredModule, ModuleCandidate, ModuleRequirement, RankedCandidate, RankingContext } from "@forge/core";
+import { deduplicateModuleCandidates, MODULE_REGISTRY, selectModuleCandidates } from "@forge/core";
 
 // ── Real GitHub Search + npm Discovery Engine ─────────────────────────────────
 // Searches GitHub repos and npm packages in real-time based on the app prompt.
@@ -260,14 +260,13 @@ async function buildModuleFromGitHub(
     id: `github-${repo.id}`,
     name: repo.name,
     capability,
-    source: "open-source-npm",
+    source: "open-source-github",
     packageName,
     version: "latest",
     description: (repo.description ?? `${repo.full_name} — ${repo.language ?? "JS"} open-source module`).slice(0, 180),
     repositoryUrl: repo.html_url,
     license,
     stars: repo.stargazers_count,
-    weeklyDownloads: repo.forks_count * 100, // forks as proxy for usage
     isVerified: isPermissive && audit.passed,
     securityAudit: {
       ...audit,
@@ -305,7 +304,6 @@ function buildModuleFromNpm(pkg: NpmPackage, capability: string): DiscoveredModu
     repositoryUrl: pkg.links?.repository ?? pkg.links?.npm ?? `https://www.npmjs.com/package/${pkg.name}`,
     license,
     stars: 0,
-    weeklyDownloads: 0,
     isVerified: isPermissive,
     securityAudit: {
       passed: isPermissive && audit.passed,
@@ -337,6 +335,17 @@ const OFFLINE_SEED: Record<string, { name: string; pkg: string; desc: string; ur
   "email":           { name: "nodemailer", pkg: "nodemailer", desc: "Easy email sending for Node.js applications", url: "https://github.com/nodemailer/nodemailer", stars: 17000, patterns: ["createTransport", "sendMail", "SMTP"] },
 };
 
+function canonicalDiscoveryCapability(capability: string): string {
+  if (/cart|catalog|product|listing|marketplace|browse|create-item/i.test(capability)) return "crud";
+  if (/resume|pdf|document|text-extract/i.test(capability)) return "file-upload";
+  if (/login|session|account|user/i.test(capability)) return "authentication";
+  if (/admin|moderation/i.test(capability)) return "admin-ui";
+  if (/chart|analytics|report/i.test(capability)) return "charts";
+  if (/csv|export/i.test(capability)) return "database";
+  if (/search|filter/i.test(capability)) return "search";
+  return capability;
+}
+
 // ── Main Discovery Function ───────────────────────────────────────────────────
 
 export async function discoverModulesForCapabilities(
@@ -353,8 +362,9 @@ export async function discoverModulesForCapabilities(
     : "";
 
   for (const capId of capabilities) {
+    const lookupCapability = canonicalDiscoveryCapability(String(capId));
     // ── 1. Always include the approved local FORGE module first ──────────────
-    const localEntry = MODULE_REGISTRY.find((e) => e.capability === capId);
+    const localEntry = MODULE_REGISTRY.find((e) => e.capability === lookupCapability);
     if (localEntry) {
       const localId = `local-${capId}`;
       if (!seenIds.has(localId)) {
@@ -370,7 +380,6 @@ export async function discoverModulesForCapabilities(
           repositoryUrl: "file:///packages/core/src/registry.ts",
           license: "MIT",
           stars: 1840,
-          weeklyDownloads: 25000,
           isVerified: true,
           securityAudit: {
             passed: true, score: 100,
@@ -382,7 +391,7 @@ export async function discoverModulesForCapabilities(
     }
 
     if (isTest) {
-      const seed = OFFLINE_SEED[capId];
+      const seed = OFFLINE_SEED[lookupCapability];
       if (seed) {
         discovered.push({
           id: `seed-${capId}`,
@@ -395,7 +404,6 @@ export async function discoverModulesForCapabilities(
           repositoryUrl: seed.url,
           license: "MIT",
           stars: seed.stars,
-          weeklyDownloads: 100000,
           isVerified: true,
           securityAudit: {
             passed: true,
@@ -409,7 +417,7 @@ export async function discoverModulesForCapabilities(
     }
 
     // ── 2. Search GitHub for real repos ─────────────────────────────────────
-    const githubQueries = CAPABILITY_GITHUB_QUERIES[capId] ?? [`${capId} node typescript open source`];
+    const githubQueries = CAPABILITY_GITHUB_QUERIES[lookupCapability] ?? [`${capId} node typescript open source`];
     // Pick query: mix capability + project hint
     const primaryQuery = projectKeyword
       ? `${githubQueries[0]} ${projectKeyword.split(" ").slice(0, 3).join(" ")}`
@@ -468,7 +476,7 @@ export async function discoverModulesForCapabilities(
 
     // ── 5. Fallback to offline seed if nothing was found ────────────────────
     if (addedFromGithub === 0 && pkgs.length === 0) {
-      const seed = OFFLINE_SEED[capId];
+      const seed = OFFLINE_SEED[lookupCapability];
       if (seed) {
         const seedId = `seed-${seed.pkg}`;
         if (!seenIds.has(seedId)) {
@@ -484,7 +492,6 @@ export async function discoverModulesForCapabilities(
             repositoryUrl: seed.url,
             license: "MIT",
             stars: seed.stars,
-            weeklyDownloads: 0,
             isVerified: true,
             securityAudit: {
               passed: true,
@@ -504,4 +511,68 @@ export async function discoverModulesForCapabilities(
     if (b.source === "approved-local" && a.source !== "approved-local") return 1;
     return (b.stars ?? 0) - (a.stars ?? 0);
   });
+}
+
+export function normalizeDiscoveredModule(module: DiscoveredModule): ModuleCandidate {
+  const source = module.source === "approved-local"
+    ? "approved-local"
+    : module.source === "open-source-github" || module.id.startsWith("github-")
+      ? "github"
+      : module.source === "open-source-npm" || module.id.startsWith("npm-") || module.id.startsWith("seed-")
+        ? "npm"
+        : "other";
+  const text = `${module.name} ${module.description} ${module.capability}`.toLowerCase();
+  return {
+    id: module.id,
+    name: module.name,
+    packageName: module.packageName,
+    version: module.version,
+    source,
+    repositoryUrl: module.repositoryUrl,
+    description: module.description,
+    capabilities: [module.capability],
+    requestedCapability: module.capability,
+    keywords: text.split(/[^a-z0-9]+/).filter((word) => word.length > 2),
+    dependencies: [],
+    license: module.license,
+    stars: module.stars,
+    weeklyDownloads: module.weeklyDownloads,
+    usage: module.stars === undefined ? undefined : { githubStars: module.stars, source: source === "github" ? "github" : "provider" },
+    runtimeCompatibility: {
+      node: !/react|browser|client|dom/i.test(text),
+      browser: /react|browser|client|dom|form|chart|ui/i.test(text),
+    },
+    frameworkCompatibility: {
+      react: /react|browser|client|form|chart|ui/i.test(text),
+      express: /express|node|server|api|upload|auth|database|sqlite/i.test(text),
+      typescript: /typescript|ts|type/i.test(text),
+    },
+    securityAudit: module.securityAudit,
+    licenseStatus: /MIT|Apache|BSD|ISC|Unlicense|CC0/i.test(module.license) ? "compatible" : module.license === "Unknown" ? "unknown" : "restricted",
+  };
+}
+
+export function buildModuleRequirement(module: { id: string; name?: string; description?: string; category?: string }, projectText = ""): ModuleRequirement {
+  const capability = module.id;
+  const description = module.description ?? `Implementation for ${module.name ?? capability}`;
+  const runtime: ModuleRequirement["runtime"] = /form|chart|admin|ui|browser|react/i.test(`${capability} ${description}`) ? "browser" : "node";
+  return {
+    id: capability,
+    capability,
+    description,
+    responsibilities: [description],
+    keywords: `${capability} ${module.name ?? ""} ${projectText}`.split(/[^a-z0-9]+/i).filter((word) => word.length > 2),
+    runtime,
+    frameworks: ["typescript", ...(runtime === "browser" ? ["react"] : ["express"])],
+    requiredFeatures: [capability],
+  };
+}
+
+export function rankDiscoveredModules(
+  requirement: ModuleRequirement,
+  modules: DiscoveredModule[],
+  context: RankingContext = {}
+): { selected?: RankedCandidate; alternatives: RankedCandidate[]; ranked: RankedCandidate[]; confidence: number } {
+  const normalized = deduplicateModuleCandidates(modules.map(normalizeDiscoveredModule));
+  return selectModuleCandidates(requirement, normalized, context);
 }

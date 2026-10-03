@@ -87,6 +87,20 @@ describe("Studio API Endpoints & Dynamic Composition", () => {
     expect(res.body.presetThemes.length).toBe(PRESET_THEMES.length);
   });
 
+  it("POST /api/studio/discovery ranks structured requirements with explanations", async () => {
+    const res = await request(server.app)
+      .post("/api/studio/discovery")
+      .send({
+        projectText: "AI resume analyzer",
+        requirements: [{ id: "pdf-parsing", description: "Extract text from uploaded PDF resumes" }],
+      });
+
+    expect(res.status).toBe(200);
+    expect(res.body.requirements[0].requirement.capability).toBe("pdf-parsing");
+    expect(res.body.requirements[0].ranked).toBeInstanceOf(Array);
+    expect(res.body.stats).toMatchObject({ candidatesDiscovered: expect.any(Number), selectedModules: expect.any(Number) });
+  });
+
   it("POST /api/studio/compose composes a custom-themed project with custom entity routes and landing page", async () => {
     const theme = PRESET_THEMES.find(t => t.id === "sunset") || PRESET_THEMES[0];
     const res = await request(server.app)
