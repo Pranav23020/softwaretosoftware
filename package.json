@@ -1,0 +1,16 @@
+{
+  "name": "forge-local",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": ["packages/*"],
+  "scripts": {
+    "dev": "concurrently -n api,web -c cyan,magenta \"npm run dev -w @forge/api\" \"npm run dev -w @forge/web\"",
+    "start": "npm run start -w @forge/api",
+    "build": "npm run build -w @forge/core && npm run build -w @forge/api && npm run build -w @forge/web",
+    "test": "npm run test -w @forge/core && npm run test -w @forge/api && npm run test -w @forge/web",
+    "test:integration": "npm run test:integration -w @forge/api",
+    "test:e2e": "npm run test:e2e -w @forge/web",
+    "generate:demo": "npm run generate:demo -w @forge/api"
+  },
+  "devDependencies": { "concurrently": "^9.1.2", "typescript": "^5.7.3" }
+}
